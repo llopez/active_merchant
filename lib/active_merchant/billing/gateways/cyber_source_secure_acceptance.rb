@@ -78,6 +78,11 @@ module ActiveMerchant #:nodoc:
         commit(build_auth_request(money, creditcard_or_reference, options), :authorize, money, options )
       end
 
+      def purchase(money, creditcard_or_reference, options = {})
+        setup_address_hash(options)
+        commit(build_purchase_request(money, creditcard_or_reference, options), :purchase, money, options )
+      end
+
       private
 
       # Create all address hash key value pairs so that we still function if we
@@ -105,6 +110,22 @@ module ActiveMerchant #:nodoc:
         request_hash[:transaction_type] = "authorization"
         request_hash[:reference_number] = SecureRandom.rand(999999999999999)
 
+        add_payment_method_or_subscription(request_hash, money, creditcard_or_reference, options)
+        add_signature(request_hash, options)
+        request_hash
+      end
+
+      def build_purchase_request(money, creditcard_or_reference, options)
+        request_hash = {}
+        request_hash[:access_key] = @options[:password]
+        request_hash[:profile_id] = @options[:login]
+        request_hash[:transaction_uuid] = SecureRandom.hex(16)
+        request_hash[:signed_field_names] = "access_key,profile_id,transaction_uuid,signed_field_names,unsigned_field_names,signed_date_time,locale,transaction_type,reference_number,amount,currency,payment_method,bill_to_forename,bill_to_surname,bill_to_email,bill_to_phone,bill_to_address_line1,bill_to_address_city,bill_to_address_state,bill_to_address_country,bill_to_address_postal_code"
+        request_hash[:unsigned_field_names] = "card_type,card_number,card_expiry_date"
+        request_hash[:locale] = "en"
+        request_hash[:transaction_type] = "sale"
+        request_hash[:reference_number] = SecureRandom.rand(999999999999999)
+        
         add_payment_method_or_subscription(request_hash, money, creditcard_or_reference, options)
         add_signature(request_hash, options)
         request_hash
