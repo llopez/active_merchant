@@ -221,6 +221,11 @@ cyber_source:
   login: X
   password: Y
 
+cyber_source_secure_acceptance:
+  login:
+  password:
+  secret_key:
+
 data_cash:
   login: X
   password: Y
