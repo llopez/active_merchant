@@ -141,7 +141,7 @@ module ActiveMerchant #:nodoc:
           bill_to_forename: payment_method.first_name,
           bill_to_surname: payment_method.last_name,
           bill_to_email: options[:email],
-          bill_to_phone: options[:phone],
+          bill_to_phone: address[:phone],
           bill_to_address_line1: address[:address1],
           bill_to_address_city: address[:city],
           bill_to_address_state: address[:state],
