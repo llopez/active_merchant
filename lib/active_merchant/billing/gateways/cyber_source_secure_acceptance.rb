@@ -3,8 +3,8 @@ require 'nokogiri'
 module ActiveMerchant #:nodoc:
   module Billing #:nodoc:
     class CyberSourceSecureAcceptanceGateway < Gateway
-      self.test_url = 'https://testsecureacceptance.cybersource.com/silent/pay'
-      self.live_url = 'https://secureacceptance.cybersource.com/silent/pay'
+      self.test_url = 'https://testsecureacceptance.cybersource.com/pay'
+      self.live_url = 'https://secureacceptance.cybersource.com/pay'
 
       self.supported_cardtypes = [:visa, :master, :american_express, :discover, :diners_club, :jcb, :switch, :dankort, :maestro]
       self.supported_countries = %w(US BR CA CN DK FI FR DE JP MX NO SE GB SG LB)
@@ -109,8 +109,25 @@ module ActiveMerchant #:nodoc:
         request_hash[:locale] = "en"
         request_hash[:transaction_type] = "authorization"
         request_hash[:reference_number] = SecureRandom.rand(999999999999999)
+        request_hash[:amount] = 100
+        request_hash[:currency] = 'USD'
+        request_hash[:payment_method] = 'card'
+        request_hash[:bill_to_forename] = creditcard_or_reference.first_name
+        request_hash[:bill_to_surname] = creditcard_or_reference.last_name
+        request_hash[:bill_to_email] = options[:email]
+        request_hash[:bill_to_phone] = "434424234234" 
+        request_hash[:bill_to_address_line1] = "adasd 345"
+        request_hash[:bill_to_address_city] = "Mountain View"
+        request_hash[:bill_to_address_state] = "CA"
+        request_hash[:bill_to_address_country] = "US"
+        request_hash[:bill_to_address_postal_code] = "94043"
+        #request_hash[:ignore_cvn] = "false"
 
-        add_payment_method_or_subscription(request_hash, money, creditcard_or_reference, options)
+        request_hash[:card_type] = @@credit_card_codes[card_brand(creditcard_or_reference).to_sym]
+        request_hash[:card_number] = creditcard_or_reference.number
+        request_hash[:card_expiry_date] = format(creditcard_or_reference.month, :two_digits) + "-" + format(creditcard_or_reference.year, :four_digits)
+
+        #add_payment_method_or_subscription(request_hash, money, creditcard_or_reference, options)
         add_signature(request_hash, options)
         request_hash
       end
@@ -132,7 +149,7 @@ module ActiveMerchant #:nodoc:
       end
 
       def add_purchase_data(request_hash, money = 0, include_grand_total = false, options={})
-        request_hash[:amount] = localized_amount(money.to_i, options[:currency] || default_currency)
+        request_hash[:amount] = 100 #localized_amount(money.to_i, options[:currency] || default_currency)
         request_hash[:currency] = options[:currency] || currency(money)
       end
 
@@ -179,11 +196,6 @@ module ActiveMerchant #:nodoc:
         end
       end
 
-      def lookup_country_code(country_field)
-        country_code = Country.find(country_field) rescue nil
-        country_code.code(:alpha2) if country_code
-      end
-
       def generate_signature(request_hash)
         Security.generate_signature(request_hash, @options[:secret_key])
       end
@@ -198,12 +210,13 @@ module ActiveMerchant #:nodoc:
       end
 
       def commit(request, action, amount, options)
+        byebug
         begin
-          response = parse(ssl_post(test? ? self.test_url : self.live_url, build_request(request)))
+          resp = parse_pay(ssl_post(test? ? self.test_url : self.live_url, build_request(request)))
+          response = ssl_post('https://testsecureacceptance.cybersource.com/checkout_update', build_request(resp), { 'Cookie' => @cookie })
+
         rescue ResponseError => e
           response = parse(e.response.body)
-        rescue REXML::ParseException => e
-          response = { message: e.to_s }
         end
 
         success = response[:decision] == "ACCEPT"
@@ -228,9 +241,64 @@ module ActiveMerchant #:nodoc:
         end.compact.join("&")
       end
 
-      def parse(html)
+      def parse_pay(html)
+        byebug
         doc = Nokogiri::HTML(html)
-        doc.xpath("//form/input[@type='hidden']").inject({}){|m, v| m.merge({v.attr(:name).to_sym => v.attr(:value)}) }
+        a = doc.xpath("//input[@type!='submit' and @type!='button']").inject({}){|m, v| m.merge({v.attr(:name).to_sym => v.attr(:value)}) }
+        b = doc.xpath("//select").inject({}){|m, v| m.merge({v.attr(:name).to_sym => v.attr(:value)}) }
+        a.merge(b).merge({
+          card_cvn: '123', 
+          card_type: '001',
+          card_expiry_month: '12',
+          card_expiry_year: '2022',
+          customer_utc_offset: '180'
+        })
+      end
+
+      def parse(html)
+        #card_number_masked???
+        #card_cvn_masked???
+        #authenticity_token
+        #session_uuid
+        #payment_method
+        #card_type
+        #card_number???
+        #card_cvn
+        #customer_utc_offset???
+        #card_expiry_month
+        #card_expiry_year
+
+        byebug
+        doc = Nokogiri::HTML(html)
+        doc.xpath("//input[@type!='submit' and @type!='button']").inject({}){|m, v| m.merge({v.attr(:name).to_sym => v.attr(:value)}) }
+      end
+
+      def build_checkout_request(params)
+      end
+
+      def handle_response(response)
+        case response.code.to_i
+        when 200...300
+          response.body
+        when 302
+          handle_redirect(response)
+        else
+          raise ResponseError.new(response)
+        end
+      end
+
+      def handle_redirect(response)
+        @cookie = response['Set-Cookie']
+        cookie = response['Set-Cookie']
+        uri_str = response['location']
+        url = URI.parse(uri_str)
+        http = Net::HTTP.new(url.host, url.port)
+        params = { 'Accept' => '*/*', 'Cookie' => cookie }
+        request = Net::HTTP::Get.new(url.path, params)
+        http.use_ssl = true
+        http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+        r = http.request(request)
+        r.body
       end
 
       def reason_message(reason_code)
